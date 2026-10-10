@@ -1,0 +1,61 @@
+# ═══════════════════════════════════════════════════════════
+# OMNIVERSO — .gitignore
+# ═══════════════════════════════════════════════════════════
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.eggs/
+*.egg
+
+# Go
+gateway/gateway
+*.exe
+*.out
+
+# Node / Web
+node_modules/
+web/command-center/dist/
+.vite/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Data volumes (local dev)
+*.sql.bak
+*.dump
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+
+# Logs
+*.log
+logs/

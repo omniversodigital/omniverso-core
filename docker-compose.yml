@@ -1,0 +1,238 @@
+# OMNIVERSO Ecosystem
+# Docker Compose — Local Development Stack
+
+services:
+  # ─── DATA LAYER ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: omni-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-omniverso}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-omniverso_dev_2024}
+      POSTGRES_DB: ${DB_NAME:-omniverso}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-omniverso}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: omni-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: omni-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── API GATEWAY (Go) ───────────────────────────────────
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: omni-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - ORCHESTRATOR_URL=http://orchestrator:8001
+      - MODEL_ROUTER_URL=http://model-router:8002
+      - REDIS_URL=redis://redis:6379/0
+      - DB_DSN=postgres://${DB_USER:-omniverso}:${DB_PASSWORD:-omniverso_dev_2024}@postgres:5432/${DB_NAME:-omniverso}?sslmode=disable
+      - JWT_SECRET=${JWT_SECRET:-omniverso-dev-secret-change-in-prod}
+      - API_KEY_SALT=${API_KEY_SALT:-omniverso-salt-change-in-prod}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── AGENT ORCHESTRATOR (Python) ────────────────────────
+  orchestrator:
+    build:
+      context: .
+      dockerfile: core/agent_orchestrator/Dockerfile
+    container_name: omni-orchestrator
+    restart: unless-stopped
+    ports:
+      - "${ORCHESTRATOR_PORT:-8001}:8001"
+    environment:
+      - PORT=8001
+      - DB_URL=postgresql+asyncpg://${DB_USER:-omniverso}:${DB_PASSWORD:-omniverso_dev_2024}@postgres:5432/${DB_NAME:-omniverso}
+      - REDIS_URL=redis://redis:6379/1
+      - QDRANT_URL=http://qdrant:6333
+      - MODEL_ROUTER_URL=http://model-router:8002
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── MODEL ROUTER (Python) ─────────────────────────────
+  model-router:
+    build:
+      context: .
+      dockerfile: core/model_router/Dockerfile
+    container_name: omni-model-router
+    restart: unless-stopped
+    ports:
+      - "${MODEL_ROUTER_PORT:-8002}:8002"
+    environment:
+      - PORT=8002
+      - REDIS_URL=redis://redis:6379/2
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - DEFAULT_PROVIDER=${DEFAULT_PROVIDER:-gemini}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-2.5-flash}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── TASK WORKER (Python) ──────────────────────────────
+  task-worker:
+    build:
+      context: .
+      dockerfile: core/task_engine/Dockerfile
+    container_name: omni-task-worker
+    restart: unless-stopped
+    environment:
+      - DB_URL=postgresql+asyncpg://${DB_USER:-omniverso}:${DB_PASSWORD:-omniverso_dev_2024}@postgres:5432/${DB_NAME:-omniverso}
+      - REDIS_URL=redis://redis:6379/1
+      - MODEL_ROUTER_URL=http://model-router:8002
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─── COMMAND CENTER (Web UI) ───────────────────────────
+  web:
+    build:
+      context: ./web/command-center
+      dockerfile: Dockerfile
+    container_name: omni-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-8080}
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  # ─── RAG ENGINE (Python) ───────────────────────────────
+  rag-engine:
+    build:
+      context: .
+      dockerfile: core/rag_engine/Dockerfile
+    container_name: omni-rag-engine
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      qdrant:
+        condition: service_started
+
+  # ─── TRADING ENGINE (Python) ───────────────────────────
+  trading-engine:
+    build:
+      context: .
+      dockerfile: core/trading_engine/Dockerfile
+    container_name: omni-trading-engine
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    environment:
+      - DB_URL=postgresql+asyncpg://${DB_USER:-omniverso}:${DB_PASSWORD:-omniverso_dev_2024}@postgres:5432/${DB_NAME:-omniverso}
+
+  # ─── TELEGRAM BOT (Python) ─────────────────────────────
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: bots/telegram/Dockerfile
+    container_name: omni-telegram-bot
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    environment:
+      - GATEWAY_URL=http://gateway:8080
+      - TRADING_ENGINE_URL=http://trading-engine:8004
+
+  # ─── HOME ASSISTANT (IoT & Automation) ────────────────
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: omni-homeassistant
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    environment:
+      - TZ=UTC
+    volumes:
+      - homeassistant_config:/config
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  homeassistant_config:
+    driver: local

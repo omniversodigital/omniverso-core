@@ -1,6 +1,15 @@
-# OMNIVERSO
+# 🌌 OMNIVERSO Platform Core
+### Distributed Autonomous Bots, Microservice Gateways & Unified Management Plane
 
-> Elite AI Ecosystem — Modular, Scalable, Revenue-Generating
+[![Go](https://img.shields.io/badge/Go-API_Gateway-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Microservices-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-Command_Center-61dafb?logo=react&logoColor=black)](https://react.dev/)
+[![Docker](https://img.shields.io/badge/Docker-Full_Orchestration-2496ed?logo=docker&logoColor=white)](https://docker.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16_Relational-336791?logo=postgresql&logoColor=white)](https://postgresql.org)
+[![Qdrant](https://img.shields.io/badge/Qdrant-Vector_Engine-dc2626?logo=qdrant&logoColor=white)](https://qdrant.tech/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+> **Omniverso Core:** Enterprise AI Ecosystem — Modular, Scalable, Distributed & High-Throughput. Built and maintained by **Omniverso Digital**.
 
 ## Quick Start
 
